@@ -1,37 +1,41 @@
-# server/tools/connection.py
 from config import mcp
-from mcp.server.fastmcp import Context
 from mcp.server.fastmcp.utilities.logging import get_logger
 
 logger = get_logger("pg-mcp.tools.connection")
 
+
 def register_connection_tools():
     """Register the database connection tools with the MCP server."""
     logger.debug("Registering database connection tools")
-    
+
     @mcp.tool()
-    async def connect(connection_string: str):
+    async def connect(conn_id: str):
         """
-        Register a database connection string and return its connection ID.
-        
+        Initialize a database connection and create a connection pool for the given connection ID.
+
         Args:
-            connection_string: PostgreSQL connection string (required)
-            example) postgresql://username:password@host:5432/database
-            
+            conn_id: SHA-1 hash of the connection string
+
         Returns:
-            Dictionary containing the connection ID
+            Dictionary with connection initialization result
         """
-        # Get database from context
-        # db = ctx.request_context.lifespan_context.get("db")
         db = mcp.state["db"]
-        
-        # Register the connection to get a connection ID
-        conn_id = db.register_connection(connection_string)
-        
-        # Return the connection ID
-        logger.info(f"Registered database connection with ID: {conn_id}")
-        return {"conn_id": conn_id}
-    
+
+        # Ensure the connection pool is initialized for the given connection ID
+        if conn_id not in db._pools:
+            try:
+                await db.initialize(conn_id)
+            except Exception as e:
+                logger.error(f"Failed to initialize pool for connection ID {conn_id}: {e}")
+                return {"success": False, "error": f"Failed to initialize connection pool: {str(e)}"}
+
+        # Check if the connection ID exists in the connection map
+        if conn_id in db._connection_map:
+            return {"success": True}
+        else:
+            logger.warning(f"Invalid connection ID: {conn_id}")
+            return {"success": False, "error": "Unknown connection ID"}
+
     @mcp.tool()
     async def disconnect(conn_id: str):
         """
@@ -43,24 +47,25 @@ def register_connection_tools():
         Returns:
             Dictionary indicating success status
         """
-        # Get database from context
-        # db = ctx.request_context.lifespan_context.get("db")
         db = mcp.state["db"]
         
-        # Check if the connection exists
-        if conn_id not in db._connection_map:
+        # Check if the connection ID exists in the connection pool
+        if conn_id not in db._pools:
             logger.warning(f"Attempted to disconnect unknown connection ID: {conn_id}")
             return {"success": False, "error": "Unknown connection ID"}
         
-        # Close the connection pool
+        # Proceed to close the connection pool and remove it
         try:
-            await db.close(conn_id)
-            # Also remove from the connection mappings
-            connection_string = db._connection_map.pop(conn_id, None)
-            if connection_string in db._reverse_map:
-                del db._reverse_map[connection_string]
-            logger.info(f"Successfully disconnected database connection with ID: {conn_id}")
+            # Close the connection pool for the given conn_id
+            logger.info(f"Closing database connection pool for connection ID {conn_id}")
+            await db._pools[conn_id].close()
+            
+            # Remove connection pool from the map
+            del db._pools[conn_id]
+            
+            logger.info(f"Successfully disconnected and removed database connection pool with ID: {conn_id}")
             return {"success": True}
+        
         except Exception as e:
             logger.error(f"Error disconnecting connection {conn_id}: {e}")
             return {"success": False, "error": str(e)}
