@@ -3,6 +3,7 @@ import asyncio
 import nest_asyncio
 import os
 import time
+import aiohttp
 from dotenv import load_dotenv
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.prebuilt import create_react_agent
@@ -34,49 +35,68 @@ if st.button("🔄 대화 초기화"):
     st.session_state.llm_history = []  # LLM에게 전달할 대화 내용도 초기화
     st.rerun()  # 페이지 새로 고침
 
+# ✅ SSE 서버 상태 확인 함수
+async def is_sse_server_healthy(url: str):
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=3) as resp:
+                if resp.status == 200 and resp.headers.get("content-type", "").startswith("text/event-stream"):
+                    return True
+    except Exception:
+        pass
+    return False
+
 # ⏳ 에이전트 호출 함수
 async def ask_agent(full_messages):
     model = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
-
-    # SystemMessage + 최근 3개 대화만
-    system_msg = full_messages[0:1]  # 첫 번째는 SystemMessage
-    dialogue = full_messages[1:]  # 이후 대화들
-    recent_dialogue = dialogue[-5:]  # 최근 5개의 대화만
-
-    # 메시지 트림: 시스템 메시지 + 최근 3개 대화
+    system_msg = full_messages[0:1]
+    dialogue = full_messages[1:]
+    recent_dialogue = dialogue[-5:]
     trimmed_messages = system_msg + recent_dialogue
 
-    # 디버깅: 최종 메시지
     with st.expander("📄 최종 메시지 (디버깅)", expanded=False):
         st.write(trimmed_messages)
 
-    # MCP 서버 연결 및 에이전트 호출
-    async with MultiServerMCPClient(
-        {
-            "pg-mcp-server": {
-                "url": "http://mcp-server:8000/sse",
-                "transport": "sse",
-            }
-        }
-    ) as client:
-        agent = create_react_agent(model, client.get_tools())
-        start = time.time()
-        res = await agent.ainvoke({"messages": trimmed_messages})
-        print("에이전트 응답 시간:", time.time() - start)
+    # ✅ MCP 서버 목록
+    servers = {
+        "pg-mcp-server": "http://mcp-server:8000/sse",
+        "backup-mcp-server": "http://mcp-server-2:8000/sse"
+    }
 
-        # 전체 응답 구조 보기
-        with st.expander("🧪 에이전트 응답 구조 (디버깅)", expanded=False):
-            st.json(res)
+    # ✅ 살아있는 MCP 서버만 선택
+    available_servers = {}
+    for name, url in servers.items():
+        st.write(f"⏱️ {name} 연결 시도 중...")
+        if await is_sse_server_healthy(url):
+            available_servers[name] = {"url": url, "transport": "sse"}
+            st.write(f"✅ {name} 연결 성공")
 
-        # 실제 응답 메시지 추출
-        if 'messages' in res:
-            for message in reversed(res['messages']):
-                if isinstance(message, AIMessage):
-                    return message
+    if not available_servers:
+        st.error("❌ MCP 서버에 연결할 수 없습니다. 모든 서버가 응답하지 않습니다.")
+        return AIMessage(content="모든 MCP 서버가 다운되어 있습니다. 잠시 후 다시 시도해 주세요.")
 
-        # 응답 문제 시 대체 메시지
-        return AIMessage(content="응답에 문제가 발생했습니다.")
+    try:
+        async with MultiServerMCPClient(available_servers) as client:
+            agent = create_react_agent(model, client.get_tools())
+            start = time.time()
+            res = await agent.ainvoke({"messages": trimmed_messages})
+            st.write("⏱️ 에이전트 응답 시간:", time.time() - start)
 
+            with st.expander("🧪 에이전트 응답 구조 (디버깅)", expanded=False):
+                st.json(res)
+
+            if 'messages' in res:
+                for message in reversed(res['messages']):
+                    if isinstance(message, AIMessage):
+                        return message
+
+            return AIMessage(content="응답에 문제가 발생했습니다.")
+
+    except Exception as e:
+        st.error("❌ MCP 클라이언트 오류 발생")
+        with st.expander("🔧 에러 상세 정보", expanded=False):
+            st.exception(e)
+        return AIMessage(content="MCP 서버에 연결 중 오류가 발생했습니다.")
 # 💬 채팅 UI: 이전 대화 불러오기
 for msg in st.session_state.chat_history:
     if isinstance(msg, HumanMessage):
