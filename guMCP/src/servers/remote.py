@@ -39,9 +39,6 @@ servers = {}
 user_session_transports = {}
 user_server_instances = {}
 
-# Global lock to protect access to user_session_transports, user_server_instances
-session_lock = asyncio.Lock()
-
 # Prometheus metrics
 active_connections = Gauge(
     "gumcp_active_connections", "Number of active SSE connections", ["server"]
@@ -56,6 +53,7 @@ METRICS_PORT = 9091
 # Initialize JWT utils
 jwt_utils = JWTUtils()
 
+
 class SessionTimeoutMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, timeout_seconds=3600):
         super().__init__(app)
@@ -63,7 +61,7 @@ class SessionTimeoutMiddleware(BaseHTTPMiddleware):
         self.session_timestamps = {}  # {session_key: last_active_time}
 
     async def dispatch(self, request, call_next):
-         # Skip authentication for metrics, root, health check, and token endpoints
+        # Skip authentication for metrics, root, health check, and token endpoints
         if request.url.path in ["/metrics", "/", "/health_check", "/token"]:
             return await call_next(request)
         session_key = None
@@ -89,20 +87,21 @@ class SessionTimeoutMiddleware(BaseHTTPMiddleware):
     async def cleanup_task(self):
         while True:
             current_time = time.time()
-            async with session_lock:
-                expired_sessions = [
-                    key for key, ts in self.session_timestamps.items()
-                    if current_time - ts > self.timeout_seconds
-                ]
-                for key in expired_sessions:
-                    if key in user_session_transports:
-                        transport = user_session_transports.pop(key)
-                        if key in user_server_instances:
-                            del user_server_instances[key]
-                        active_connections.labels(server=key.split(":")[0]).dec()
-                        logger.info(f"Cleaned up idle session: {key}")
-                        del self.session_timestamps[key]
+            expired_sessions = [
+                key
+                for key, ts in self.session_timestamps.items()
+                if current_time - ts > self.timeout_seconds
+            ]
+            for key in expired_sessions:
+                if key in user_session_transports:
+                    transport = user_session_transports.pop(key)
+                    if key in user_server_instances:
+                        del user_server_instances[key]
+                    active_connections.labels(server=key.split(":")[0]).dec()
+                    logger.info(f"Cleaned up idle session: {key}")
+                    del self.session_timestamps[key]
             await asyncio.sleep(300)  # Check every minute
+
 
 class JWTMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
@@ -114,24 +113,21 @@ class JWTMiddleware(BaseHTTPMiddleware):
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
             return JSONResponse(
-                {"error": "Missing or invalid Authorization header"},
-                status_code=401
+                {"error": "Missing or invalid Authorization header"}, status_code=401
             )
 
         # Extract and verify JWT token
-        token = auth_header[len("Bearer "):]
+        token = auth_header[len("Bearer ") :]
         try:
             payload = jwt_utils.verify_jwt_token(token)
             request.state.user_id = payload["user_id"]
             request.state.conn_id = None
         except ValueError as e:
             logger.error(f"JWT verification failed: {e}")
-            return JSONResponse(
-                {"error": str(e)},
-                status_code=401
-            )
+            return JSONResponse({"error": str(e)}, status_code=401)
 
         return await call_next(request)
+
 
 def discover_servers():
     """Discover and load all servers from the servers directory"""
@@ -170,8 +166,10 @@ def discover_servers():
 
     logger.info(f"Discovered {len(servers)} servers")
 
+
 def create_metrics_app():
     """Create a separate Starlette app just for metrics"""
+
     async def metrics_endpoint(request):
         """Prometheus metrics endpoint"""
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
@@ -179,6 +177,7 @@ def create_metrics_app():
     routes = [Route("/metrics", endpoint=metrics_endpoint)]
     app = Starlette(debug=True, routes=routes)
     return app
+
 
 def create_starlette_app():
     """Create a Starlette app with multiple SSE transports for different servers"""
@@ -192,32 +191,22 @@ def create_starlette_app():
             user_id = body.get("user_id")
 
             if not user_id:
-                return JSONResponse(
-                    {"error": "user_id is required"},
-                    status_code=400
-                )
+                return JSONResponse({"error": "user_id is required"}, status_code=400)
 
             jwt_token = jwt_utils.generate_jwt_token(user_id)
             logger.info(f"Issued JWT token for user {user_id} ")
-            return JSONResponse(
-                {"success": True, "jwt_token": jwt_token}
-            )
+            return JSONResponse({"success": True, "jwt_token": jwt_token})
         except ValueError as e:
             logger.error(f"Failed to issue JWT token: {e}")
-            return JSONResponse(
-                {"error": str(e)},
-                status_code=400
-            )
+            return JSONResponse({"error": str(e)}, status_code=400)
         except Exception as e:
             logger.error(f"Failed to issue JWT token: {e}")
-            return JSONResponse(
-                {"error": str(e)},
-                status_code=500
-            )
+            return JSONResponse({"error": str(e)}, status_code=500)
 
     routes.append(Route("/token", endpoint=token_endpoint, methods=["POST"]))
 
     for server_name, server_info in servers.items():
+
         def create_handler(server_name, server_factory, get_init_options):
             async def handle_sse(request):
                 """Handle SSE connection requests for a specific server and session"""
@@ -227,28 +216,28 @@ def create_starlette_app():
                 # Use user_id from JWT payload, conn_id from path if needed
                 user_id = request.state.user_id
                 # Parse conn_id from session_key if needed (e.g., user123:hash1)
-                conn_id = session_key_encoded.split(":")[-1] if ":" in session_key_encoded else None
-
-
+                conn_id = (
+                    session_key_encoded.split(":")[-1]
+                    if ":" in session_key_encoded
+                    else None
+                )
 
                 sse_transport = SseServerTransport(
                     f"/{server_name}/{session_key_encoded}/messages/"
                 )
 
-                # dict 객체 Lock 추가
-                async with session_lock:
-                    user_session_transports[session_key] = sse_transport
+                user_session_transports[session_key] = sse_transport
 
-                    if session_key not in user_server_instances:
-                        server_instance = server_factory(user_id, conn_id)
-                        user_server_instances[session_key] = server_instance
-                        active_connections.labels(server=server_name).inc()
-                    else:
-                        server_instance = user_server_instances[session_key]
+                if session_key not in user_server_instances:
+                    server_instance = server_factory(user_id, conn_id)
+                    user_server_instances[session_key] = server_instance
+                    active_connections.labels(server=server_name).inc()
+                else:
+                    server_instance = user_server_instances[session_key]
 
                 init_options = get_init_options(server_instance)
 
-                try:                                       
+                try:
                     # Always increment total connections counter
                     # connection_total.labels(server=server_name).inc()
 
@@ -264,14 +253,13 @@ def create_starlette_app():
                             init_options,
                         )
                 finally:
-                    async with session_lock:
-                        if session_key in user_session_transports:
-                            del user_session_transports[session_key]
-                            # Decrement active connections metric
-                            active_connections.labels(server=server_name).dec()
-                            logger.info(
-                                f"Closed SSE connection for {server_name} session: {user_id}"
-                            )
+                    if session_key in user_session_transports:
+                        del user_session_transports[session_key]
+                        # Decrement active connections metric
+                        active_connections.labels(server=server_name).dec()
+                        logger.info(
+                            f"Closed SSE connection for {server_name} session: {user_id}"
+                        )
 
             return handle_sse
 
@@ -329,18 +317,21 @@ def create_starlette_app():
     routes.append(Route("/health_check", endpoint=health_check))
 
     app = Starlette(debug=True, routes=routes)
-    
-    app.add_middleware(SessionTimeoutMiddleware, timeout_seconds=3600)  # Add session timeout middleware
+
+    app.add_middleware(
+        SessionTimeoutMiddleware, timeout_seconds=3600
+    )  # Add session timeout middleware
     app.add_middleware(JWTMiddleware)  # Add JWT middleware
 
-
     return app
+
 
 def run_metrics_server(host, port):
     """Run a separate metrics server on the specified port"""
     metrics_app = create_metrics_app()
     logger.info(f"Starting metrics server on {host}:{port}")
     uvicorn.run(metrics_app, host=host, port=port)
+
 
 def main():
     """Main entry point for the Starlette server"""
@@ -361,6 +352,7 @@ def main():
     app = create_starlette_app()
     logger.info(f"Starting Starlette server on {args.host}:{args.port}")
     uvicorn.run(app, host=args.host, port=args.port)
+
 
 if __name__ == "__main__":
     main()
