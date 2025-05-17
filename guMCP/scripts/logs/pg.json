@@ -1,0 +1,20 @@
+[
+  {
+    "pg_connect": "{\"success\": true}"
+  },
+  {
+    "pg_list_schemas": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"schema_name\": \"information_schema\"\n    },\n    {\n      \"schema_name\": \"pg_catalog\"\n    },\n    {\n      \"schema_name\": \"pg_toast\"\n    },\n    {\n      \"schema_name\": \"public\"\n    }\n  ]\n}"
+  },
+  {
+    "pg_disconnect": "{\"success\": true}"
+  },
+  {
+    "pg_list_tables": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"table_name\": \"customers\"\n    },\n    {\n      \"table_name\": \"products\"\n    },\n    {\n      \"table_name\": \"promotions\"\n    }\n  ]\n}"
+  },
+  {
+    "pg_list_table_metadata": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"table_name\": \"customers\",\n      \"table_type\": \"BASE TABLE\",\n      \"table_comment\": null\n    }\n  ]\n}"
+  },
+  {
+    "pg_query": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"customer_id\": 1,\n      \"name\": \"\\uae40\\ubbfc\\uc218\",\n      \"gender\": \"\\ub0a8\",\n      \"birth_date\": \"1990-05-12\",\n      \"email\": \"minsu.kim@example.com\",\n      \"created_at\": \"2025-04-18T23:05:02.236994\"\n    },\n    {\n      \"customer_id\": 2,\n      \"name\": \"\\uc774\\uc218\\uc9c4\",\n      \"gender\": \"\\uc5ec\",\n      \"birth_date\": \"1987-11-23\",\n      \"email\": \"sujin.lee@example.com\",\n      \"created_at\": \"2025-04-18T23:05:02.236994\"\n    },\n    {\n      \"customer_id\": 3,\n      \"name\": \"\\ubc15\\uc815\\uc6b0\",\n      \"gender\": \"\\ub0a8\",\n      \"birth_date\": \"1995-03-08\",\n      \"email\": \"jungwoo.park@example.com\",\n      \"created_at\": \"2025-04-18T23:05:02.236994\"\n    }\n  ]\n}"
+  }
+]

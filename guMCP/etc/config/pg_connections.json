@@ -1,0 +1,6 @@
+{
+    "test_key": "postgres://postgres:1234@postgres:5432/crm",
+    "test_user": "postgres://test_user:test_user@postgres:5432/crm",
+    "test_user1": "postgres://test_user1:test_user1@postgres:5432/crm",
+    "e1234567": "postgres://postgres:1234@postgres:5432/crm"
+}
