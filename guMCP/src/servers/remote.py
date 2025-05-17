@@ -67,7 +67,7 @@ class SessionTimeoutMiddleware(BaseHTTPMiddleware):
         if request.url.path in ["/metrics", "/", "/health_check", "/token"]:
             return await call_next(request)
         session_key = None
-        logger.info(f"Entering dispatch for URL={request.url.path}, method={request.method}, params= {request.path_params}")
+        # logger.info(f"Entering dispatch for URL={request.url.path}, method={request.method}, params= {request.path_params}")
         server_name = request.url.path.split("/")[1]
         session_param = request.url.path.split("/")[2]
         session_key = f"{server_name}:{session_param}"
@@ -103,8 +103,6 @@ class SessionTimeoutMiddleware(BaseHTTPMiddleware):
                         logger.info(f"Cleaned up idle session: {key}")
                         del self.session_timestamps[key]
             await asyncio.sleep(300)  # Check every minute
-
-
 
 class JWTMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
